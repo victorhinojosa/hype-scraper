@@ -1,29 +1,31 @@
 """Source #1 — Passline (https://www.passline.com).
 
-Passline is behind Cloudflare (passive TLS fingerprint check) — see http.py for
-how we get past it. Data comes from two places:
+Passline's public site is behind Cloudflare, but its BACKEND JSON API is not:
 
-  1. A search listing endpoint filtered to San Luis Potosí, which gives us the
-     set of event detail URLs.
-  2. Each detail page carries a single <script type="application/ld+json"> of
-     type schema.org/Event with almost everything we need: name, image (flyer),
-     start/end datetime, location (venue name + street address), description,
-     and offers (price -> price_label). AI fallback is only used when a field is
-     still missing AND a flyer image exists (rare for Passline).
+    POST https://api.passline.com/v1/event/GetBillboardByFilters
 
-TIMEZONE NOTE: startDate is tagged with an Argentine offset (Passline is an
-Argentine company) e.g. "2026-08-02T19:30:00-03:00", but the wall-clock time IS
-the local SLP show time — verified against the listing page which shows the same
-HH:MM. So we parse the NAIVE datetime and never convert.
+is reachable directly with a browser-impersonating client (curl_cffi) — no
+Cloudflare challenge, no proxy, no headless browser. This is the same endpoint
+the site's own `callEventsFilter-new.js` calls to render the listing. It returns
+a clean JSON array with everything we need: slug, name, venue (`lugar`),
+start/end date+time, min price + currency, flyer image, and ticket url.
+
+The only field it lacks is the venue STREET ADDRESS. For that we fetch the event
+detail page (on the un-challenged `www.` host) and read its schema.org/Event
+JSON-LD — but only for NEW events (after dedup), so it's cheap. If that fetch
+fails, we still create the draft without an address (the admin adds it, or the
+matched venue supplies it).
+
+TIMEZONE: the API returns naive local date/time (e.g. "19:30:00") already in SLP
+wall-clock time — no conversion needed.
 """
 from __future__ import annotations
 
+import html as html_lib
 import json
 import logging
 import re
 from typing import Optional
-
-from bs4 import BeautifulSoup
 
 from .. import http
 from ..models import ScrapedEvent
@@ -32,205 +34,169 @@ log = logging.getLogger("hype_scraper.passline")
 
 SOURCE = "passline"
 
-# Search filtered to SLP. These events are titled "... en San Luis Potosí", so a
-# text query is precise; we additionally sanity-check the venue address below.
-_LISTING_URL = (
-    "https://home.passline.com/eventos.php"
-    "?q=san+luis+potosi&category=&region=&comuna=&mes=&pais=mexico&page={page}"
-)
-_MAX_PAGES = 5  # generous; SLP rarely fills one page
+_API_URL = "https://api.passline.com/v1/event/GetBillboardByFilters"
+_SEARCH_TEXT = "san luis potosi"
+_COUNTRY = "mexico"
+_PAGE_LIMIT = 300  # the site itself requests 300; SLP returns ~12
 
-# Event detail links look like www.passline.com/eventos/<slug>. Require the www
-# host and a slug made only of [a-z0-9-] so we don't also catch image URLs under
-# /imagenes/eventos/...jpg. The slug must contain a letter (image files are like
-# "-737216-rec.jpg" or "533369-rec"), which the [a-z] lookahead-free class + the
-# trailing filter below enforce.
-_EVENT_LINK_RE = re.compile(
-    r"www\.passline\.com/eventos/([a-z0-9](?:[a-z0-9-]*[a-z0-9])?)", re.IGNORECASE
-)
-# Reject anything that is clearly an image/asset filename, not an event slug.
-_ASSET_RE = re.compile(r"\.(jpe?g|png|gif|webp|svg)$|-rec$|-rec[-_]", re.IGNORECASE)
-# Only accept locations that look like San Luis Potosí, to drop the odd
-# cross-city match the text search might surface.
+# Keep only events whose region/venue text looks like San Luis Potosí, guarding
+# against the odd cross-city match a free-text search might surface.
 _SLP_RE = re.compile(r"san\s*luis\s*potos|s\.?l\.?p\.?", re.IGNORECASE)
 
 
-def _slugs_from_html(html: str) -> list[str]:
-    """Extract event slugs from listing HTML. Pure function — unit-testable."""
-    slugs = []
-    for slug in _EVENT_LINK_RE.findall(html):
-        slug = slug.strip("/")
-        if not slug or "eventos.php" in slug or _ASSET_RE.search(slug):
-            continue
-        slugs.append(slug)
-    return sorted(set(slugs))
+def _api_events() -> list[dict]:
+    """Call the Passline billboard API filtered to SLP. Returns raw records."""
+    body = {
+        "country": _COUNTRY,
+        "region": None,
+        "commune": "",
+        "communeNum": None,
+        "type": 0,
+        "start_date": "",
+        "end_date": "",
+        "text": _SEARCH_TEXT,
+        "tag_id": None,
+        "tag": None,
+        "upper_category_id": None,
+        "limit": f"0,{_PAGE_LIMIT}",
+        "offset": "1",
+    }
+    resp = http.session().post(
+        _API_URL,
+        json=body,
+        headers={
+            "Accept": "application/json",
+            "Content-Type": "application/json",
+            "Origin": "https://home.passline.com",
+            "Referer": "https://home.passline.com/",
+        },
+        timeout=30,
+    )
+    resp.raise_for_status()
+    data = resp.json()
+    return data if isinstance(data, list) else []
 
 
-def _listing_slugs(page: int) -> list[str]:
-    """Return event slugs (source_event_id) found on one listing page.
+def _clean(s: Optional[str]) -> Optional[str]:
+    """Decode HTML entities (API returns e.g. 'San Luis Potos&iacute;') and trim."""
+    if s is None:
+        return None
+    s = html_lib.unescape(s).strip()
+    return s or None
 
-    The listing host (home.passline.com) is behind a Cloudflare JS challenge, so
-    this goes through http.get_rendered (ScraperAPI). Detail pages below use the
-    fast direct http.get — they aren't challenged.
+
+def _hhmm(t: Optional[str]) -> Optional[str]:
+    """'19:30:00' -> '19:30'; empty/None -> None."""
+    if not t:
+        return None
+    m = re.match(r"(\d{1,2}):(\d{2})", t.strip())
+    return f"{int(m.group(1)):02d}:{m.group(2)}" if m else None
+
+
+def _ymd(d: Optional[str]) -> Optional[str]:
+    if not d:
+        return None
+    m = re.match(r"\d{4}-\d{2}-\d{2}", d.strip())
+    return m.group(0) if m else None
+
+
+def _price_label(rec: dict) -> Optional[str]:
+    """Build 'Desde $500 MXN' from precio_min + currency symbol."""
+    raw = rec.get("precio_min")
+    try:
+        n = float(raw)
+    except (TypeError, ValueError):
+        return None
+    if n <= 0:
+        return None
+    amount = f"${int(n)}" if n.is_integer() else f"${n:.2f}"
+    # simbolo_moneda is like "MXN $" — take the currency code if present.
+    sym = (rec.get("simbolo_moneda") or "").strip()
+    code = re.sub(r"[^A-Z]", "", sym.upper()) or None
+    label = f"Desde {amount}"
+    return f"{label} {code}" if code else label
+
+
+def _detail_address(slug: str) -> Optional[str]:
+    """Fetch the (un-challenged) detail page and read streetAddress from JSON-LD.
+
+    Best-effort: any failure returns None — the draft is still created.
     """
-    resp = http.get_rendered(_LISTING_URL.format(page=page))
-    return _slugs_from_html(resp.text)
+    try:
+        resp = http.get(f"https://www.passline.com/eventos/{slug}")
+        m = re.search(r'"streetAddress"\s*:\s*"([^"]+)"', resp.text)
+        return _clean(m.group(1)) if m else None
+    except Exception as e:  # noqa: BLE001
+        log.warning("could not fetch address for %s: %s", slug, e)
+        return None
 
 
-def _detail_url(slug: str) -> str:
-    return f"https://www.passline.com/eventos/{slug}"
-
-
-def _parse_jsonld(html: str) -> Optional[dict]:
-    """Return the schema.org/Event JSON-LD object from a detail page, or None."""
-    soup = BeautifulSoup(html, "html.parser")
-    for tag in soup.find_all("script", attrs={"type": "application/ld+json"}):
-        raw = (tag.string or tag.get_text() or "").strip()
-        if not raw:
-            continue
-        try:
-            data = json.loads(raw)
-        except json.JSONDecodeError:
-            continue
-        # May be a single object or a @graph list.
-        candidates = data.get("@graph", [data]) if isinstance(data, dict) else data
-        if isinstance(candidates, dict):
-            candidates = [candidates]
-        for obj in candidates:
-            if isinstance(obj, dict) and obj.get("@type") == "Event":
-                return obj
+def _flyer_url(rec: dict) -> Optional[str]:
+    """Prefer the full-size 'recorte' flyer; ignore bare directory URLs."""
+    for key in ("recorte", "miniatura"):
+        u = (rec.get(key) or "").strip()
+        # must have an actual filename with an image extension
+        if u and re.search(r"/[^/]+\.(jpe?g|png|webp|gif)$", u, re.IGNORECASE):
+            return u
     return None
 
 
-def _split_datetime(iso: Optional[str]) -> tuple[Optional[str], Optional[str]]:
-    """'2026-08-02T19:30:00-03:00' -> ('2026-08-02', '19:30'). Offset ignored.
-
-    Also tolerates a space separator and date-only strings.
-    """
-    if not iso:
-        return None, None
-    s = iso.strip().replace(" ", "T", 1) if " " in iso and "T" not in iso else iso.strip()
-    m = re.match(r"(\d{4}-\d{2}-\d{2})(?:T(\d{2}):(\d{2}))?", s)
-    if not m:
-        return None, None
-    date = m.group(1)
-    time = f"{m.group(2)}:{m.group(3)}" if m.group(2) else None
-    return date, time
-
-
-def _price_label(offers) -> Optional[str]:
-    """Build a human price label from schema.org offers (single or Aggregate)."""
-    if not isinstance(offers, dict):
-        return None
-    currency = offers.get("priceCurrency") or "MXN"
-    low = offers.get("lowPrice") or offers.get("price")
-    high = offers.get("highPrice")
-
-    def money(v) -> Optional[str]:
-        try:
-            n = float(v)
-        except (TypeError, ValueError):
-            return None
-        return f"${int(n)}" if n.is_integer() else f"${n:.2f}"
-
-    lo, hi = money(low), money(high)
-    if lo and hi and lo != hi:
-        return f"{lo} - {hi} {currency}"
-    if lo:
-        return f"{lo} {currency}"
-    return None
-
-
-def _venue_and_address(location) -> tuple[Optional[str], Optional[str]]:
-    if not isinstance(location, dict):
-        return None, None
-    name = location.get("name") or None
-    addr = location.get("address")
-    street = None
-    if isinstance(addr, dict):
-        street = addr.get("streetAddress") or None
-    elif isinstance(addr, str):
-        street = addr or None
-    return name, street
-
-
-def _parse_event(slug: str) -> Optional[ScrapedEvent]:
-    """Fetch a detail page and map its JSON-LD into a ScrapedEvent."""
-    resp = http.get(_detail_url(slug))
-    obj = _parse_jsonld(resp.text)
-    if not obj:
-        log.warning("no Event JSON-LD on %s", slug)
+def _to_scraped(rec: dict, *, with_address: bool) -> Optional[ScrapedEvent]:
+    slug = _clean(rec.get("slug"))
+    name = _clean(rec.get("nombre"))
+    if not slug or not name:
         return None
 
-    venue_name, address = _venue_and_address(obj.get("location"))
-
-    # Sanity filter: keep only events that look like they're in SLP, checking the
-    # address and the title (Passline titles include the city).
-    haystack = " ".join(filter(None, [address or "", obj.get("name") or "", venue_name or ""]))
-    if not _SLP_RE.search(haystack):
+    # SLP sanity filter across region + venue + name.
+    region = _clean(rec.get("nombre_region")) or ""
+    venue = _clean(rec.get("lugar"))
+    if not _SLP_RE.search(" ".join([region, venue or "", name])):
         log.info("dropping non-SLP event: %s", slug)
         return None
 
-    date_start, time_start = _split_datetime(obj.get("startDate"))
-    date_end, time_end = _split_datetime(obj.get("endDate"))
-    # Only keep date_end if it differs from date_start (single-day otherwise).
+    date_start = _ymd(rec.get("fecha_inicio"))
+    date_end = _ymd(rec.get("fecha_termino"))
     if date_end == date_start:
         date_end = None
 
-    image = obj.get("image")
-    if isinstance(image, list):
-        image = image[0] if image else None
-    # Passline sometimes emits a bare directory URL (…/imagenes/eventos/) with no
-    # filename when a flyer is missing — treat that as no image.
-    if isinstance(image, str):
-        image = image.strip()
-        if not image or image.rstrip("/").endswith("/imagenes/eventos") or \
-                not re.search(r"/[^/]+\.[a-z0-9]{2,4}$", image, re.IGNORECASE):
-            image = None
-    else:
-        image = None
+    url = _clean(rec.get("url")) or f"https://www.passline.com/eventos/{slug}"
+
+    address = _detail_address(slug) if with_address else None
 
     return ScrapedEvent(
         source=SOURCE,
         source_event_id=slug,
-        name=(obj.get("name") or "").strip(),
-        venue_name=venue_name,
+        name=name,
+        venue_name=venue,
         address=address,
         date_start=date_start,
         date_end=date_end,
-        time_start=time_start,
-        time_end=time_end,
-        price_label=_price_label(obj.get("offers")),
-        ticket_url=_detail_url(slug),
-        source_image_url=image if isinstance(image, str) else None,
-        raw_description=(obj.get("description") or None),
+        time_start=_hhmm(rec.get("hora_inicio")),
+        time_end=_hhmm(rec.get("hora_termino")),
+        price_label=_price_label(rec),
+        ticket_url=url,
+        source_image_url=_flyer_url(rec),
     )
 
 
-def scrape() -> list[ScrapedEvent]:
-    """Collect SLP events from Passline. Raises on hard fetch failure so the
-    runner can isolate it; individual bad detail pages are skipped, not fatal."""
-    slugs: list[str] = []
-    for page in range(1, _MAX_PAGES + 1):
-        page_slugs = _listing_slugs(page)
-        if not page_slugs:
-            break
-        new = [s for s in page_slugs if s not in slugs]
-        slugs.extend(new)
-        # If a page returns only slugs we've already collected, we've looped.
-        if not new:
-            break
+def scrape(*, fetch_address: bool = True) -> list[ScrapedEvent]:
+    """Collect SLP events from the Passline API.
 
-    log.info("passline listing: %d candidate events", len(slugs))
+    Raises on a hard API failure so the runner can isolate this source; a single
+    malformed record is skipped, not fatal. `fetch_address=False` skips the
+    per-event detail fetch (useful for a fast smoke test).
+    """
+    records = _api_events()
+    log.info("passline API: %d records", len(records))
 
     events: list[ScrapedEvent] = []
-    for slug in slugs:
+    for rec in records:
         try:
-            ev = _parse_event(slug)
-            if ev and ev.name:
+            ev = _to_scraped(rec, with_address=fetch_address)
+            if ev:
                 events.append(ev)
-        except Exception as e:  # noqa: BLE001 — one bad detail page shouldn't stop the source
-            log.warning("failed to parse detail %s: %s", slug, e)
+        except Exception as e:  # noqa: BLE001 — one bad record shouldn't stop the source
+            log.warning("failed to map record %s: %s", rec.get("slug"), e)
 
-    log.info("passline: %d SLP events parsed", len(events))
+    log.info("passline: %d SLP events mapped", len(events))
     return events

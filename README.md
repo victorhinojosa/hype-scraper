@@ -37,21 +37,28 @@ independent of Vercel, so it must not depend on the web app being deployed and
 awake. The prompt is a copy of `hype/src/lib/prompts/flyer-extract.ts`; if you
 change one, consider the other, but they're allowed to diverge.
 
-## Cloudflare
+## How Passline is scraped (no proxy needed)
 
-Passline is split across two hosts with different protection:
+Passline's public *pages* are behind Cloudflare (the listing page uses a full JS
+challenge), but its **backend JSON API is not**:
 
-- **Detail pages** (`www.passline.com/eventos/<slug>`) — the rich schema.org
-  JSON-LD lives here. Only a passive TLS-fingerprint check, cleared by
-  `curl_cffi` impersonating Chrome (`hype_scraper/http.py`). Fast, direct.
-- **Listing host** (`home.passline.com`) — used to *discover* SLP event URLs.
-  Behind a full Cloudflare **JS challenge** that headless browsers don't reliably
-  pass. We fetch just this one page per run through **ScraperAPI**
-  (`http.get_rendered`), which solves the challenge and returns the HTML.
+    POST https://api.passline.com/v1/event/GetBillboardByFilters
 
-So one proxied request per run for discovery, then fast direct fetches for every
-detail page. Set `SCRAPERAPI_KEY` (free tier is enough for 1–2 runs/day). Without
-it, discovery is blocked but detail parsing still works — useful for local dev.
+This is the same endpoint the site's own JS calls. We hit it directly with
+`curl_cffi` (Chrome impersonation) — no proxy, no headless browser, no ScraperAPI.
+It returns a clean JSON array of SLP events with slug, name, venue, start/end
+date+time, price, flyer image, and ticket URL.
+
+The one field the API omits is the venue **street address**. For that we fetch
+the detail page (`www.passline.com/eventos/<slug>`, which is *not* JS-challenged)
+and read `streetAddress` from its schema.org JSON-LD — but only for **new** events
+(after dedup), so it's cheap. If it fails, the draft is still created (the matched
+venue or the admin supplies the address).
+
+> We originally tried ScraperAPI/FlareSolverr to solve the listing challenge;
+> finding the JSON API made all of that unnecessary. If Passline ever locks the
+> API down, `curl_cffi` + the detail JSON-LD is the fallback, or a JS-rendering
+> proxy for discovery.
 
 ## Setup
 
@@ -71,8 +78,7 @@ python run.py             # real run
 ```
 
 Env vars: `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY` (service role, **not**
-anon), `ANTHROPIC_API_KEY`, `SCRAPERAPI_KEY` (for Passline discovery). Optional:
-`DRY_RUN`, `SOURCES=passline`.
+anon), `ANTHROPIC_API_KEY`. Optional: `DRY_RUN`, `SOURCES=passline`.
 
 ### 3. Render
 

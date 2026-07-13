@@ -1,21 +1,18 @@
-"""A shared HTTP session that gets past Cloudflare's TLS fingerprinting.
+"""A shared HTTP session that gets past passive TLS fingerprinting.
 
-Passline (and likely other ticketing sites) sit behind Cloudflare, which 403s a
-plain `requests` client. curl_cffi impersonates a real Chrome TLS handshake +
-header order, which clears the passive fingerprint check. If a site ever serves
-the interactive JS challenge instead, that source should fall back to a headless
-browser — out of scope for now, and Passline's passive check is what we hit.
+Some sources (and Passline's asset/detail hosts) sit behind Cloudflare's passive
+fingerprint check, which 403s a plain `requests` client. curl_cffi impersonates a
+real Chrome TLS handshake + header order, which clears it. Used for the Passline
+JSON API, its flyer images, and detail pages. (The Passline listing *page* is
+behind a full JS challenge, but we avoid it entirely by calling the JSON API.)
 """
 from __future__ import annotations
 
 import logging
 import time
 from typing import Optional
-from urllib.parse import quote_plus
 
 from curl_cffi import requests as cffi_requests
-
-from . import config
 
 log = logging.getLogger("hype_scraper.http")
 
@@ -58,26 +55,3 @@ def get(url: str, *, retries: int = 3, **kwargs) -> cffi_requests.Response:
                 raise
     assert last_exc is not None
     raise last_exc
-
-
-def get_rendered(url: str, **kwargs) -> cffi_requests.Response:
-    """Fetch a URL that may be behind a Cloudflare JS challenge.
-
-    If SCRAPERAPI_KEY is set, route through ScraperAPI with JS rendering (it
-    solves the challenge and returns the final HTML). Otherwise fall back to a
-    direct `get()` — which works for un-challenged hosts but will 403 on a
-    challenged one (surfaced to the caller so the source can log and continue).
-    """
-    if not config.SCRAPERAPI_KEY:
-        log.warning("SCRAPERAPI_KEY not set — fetching %s directly (may be blocked)", url)
-        return get(url, **kwargs)
-
-    proxied = (
-        "https://api.scraperapi.com/"
-        f"?api_key={config.SCRAPERAPI_KEY}"
-        f"&render=true&country_code=mx&url={quote_plus(url)}"
-    )
-    # ScraperAPI renders + retries internally; give it a longer timeout and no
-    # impersonation (we're talking to ScraperAPI, not the target).
-    kwargs.setdefault("timeout", 70)
-    return get(proxied, retries=2, **kwargs)

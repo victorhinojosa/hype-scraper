@@ -21,8 +21,6 @@ services:
         sync: false
       - key: ANTHROPIC_API_KEY
         sync: false
-      - key: SCRAPERAPI_KEY
-        sync: false
       - key: DRY_RUN
         value: "0"
       - key: PYTHON_VERSION

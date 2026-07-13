@@ -34,12 +34,6 @@ SUPABASE_URL = _require("SUPABASE_URL")
 SUPABASE_SERVICE_ROLE_KEY = _require("SUPABASE_SERVICE_ROLE_KEY")
 ANTHROPIC_API_KEY = _require("ANTHROPIC_API_KEY")
 
-# Optional. A Cloudflare-solving proxy (ScraperAPI) used ONLY for pages behind a
-# JS challenge — e.g. Passline's listing host. If unset, http.get_rendered()
-# falls back to a direct fetch (fine for un-challenged hosts / local dev of
-# detail parsing, but the Passline listing will 403 without it).
-SCRAPERAPI_KEY = os.environ.get("SCRAPERAPI_KEY", "").strip() or None
-
 DRY_RUN = _flag("DRY_RUN")
 
 # Optional allow-list of sources to run, e.g. SOURCES=passline
