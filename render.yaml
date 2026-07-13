@@ -1,0 +1,29 @@
+# Render blueprint — a Cron Job that runs the scraper on a schedule.
+# https://render.com/docs/cronjobs
+#
+# Cron Jobs on Render run the `startCommand` on the `schedule`, then exit.
+# Secrets (SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, ANTHROPIC_API_KEY) are set
+# in the Render dashboard, NOT here — do not commit secrets.
+services:
+  - type: cron
+    name: hype-scraper
+    runtime: python
+    plan: starter
+    # Twice a day, at 09:00 and 21:00 America/Mexico_City (UTC-6).
+    # Render cron schedules are in UTC, so that's 15:00 and 03:00 UTC.
+    schedule: "0 3,15 * * *"
+    buildCommand: pip install -r requirements.txt
+    startCommand: python run.py
+    envVars:
+      - key: SUPABASE_URL
+        sync: false
+      - key: SUPABASE_SERVICE_ROLE_KEY
+        sync: false
+      - key: ANTHROPIC_API_KEY
+        sync: false
+      - key: SCRAPERAPI_KEY
+        sync: false
+      - key: DRY_RUN
+        value: "0"
+      - key: PYTHON_VERSION
+        value: "3.12.6"
