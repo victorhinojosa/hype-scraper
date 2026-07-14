@@ -70,7 +70,8 @@ editor. It creates the `scraped_events` dedup log.
 ### 2. Local
 
 ```bash
-python -m venv .venv && source .venv/Scripts/activate   # Windows Git Bash
+python -m venv .venv 
+.\.venv\Scripts\Activate.ps1    # Windows Git Bash
 pip install -r requirements.txt
 cp .env.example .env      # fill in the three secrets from hype/.env.local
 DRY_RUN=1 python run.py   # parse + log everything, write nothing
