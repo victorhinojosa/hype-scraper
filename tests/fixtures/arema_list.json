@@ -1,0 +1,110 @@
+{
+ "data": {
+  "events": [
+   {
+    "event_id": 20249,
+    "event_name": "Alex Quiroz en San Luis Potosi",
+    "subdomain": null,
+    "category_id": 4,
+    "category_name": "Comediantes",
+    "date": 1785463200,
+    "venue_id": 434,
+    "venue_name": "La Casa de Oscar Burgos San Luis",
+    "city": "San Luis Potosí",
+    "state": "San Luis Potosí",
+    "poster": null
+   },
+   {
+    "event_id": 17208,
+    "event_name": "Carlos Ballarta Presenta \"Naco Ladino\" en San Luis Potosí",
+    "subdomain": null,
+    "category_id": 4,
+    "category_name": "Comediantes",
+    "date": 1788055200,
+    "venue_id": 242,
+    "venue_name": "Teatro de la Paz",
+    "city": "San Luis Potosí",
+    "state": "San Luis Potosí",
+    "poster": null
+   },
+   {
+    "event_id": 17579,
+    "event_name": "Camilo - Tour México 2026 en San Luis",
+    "subdomain": null,
+    "category_id": 1,
+    "category_name": "Concierto",
+    "date": 1788750000,
+    "venue_id": 237,
+    "venue_name": "Teatro de la Ciudad Parquetangamanga II",
+    "city": "San Luis Potosí",
+    "state": "San Luis Potosí",
+    "poster": null
+   },
+   {
+    "event_id": 20423,
+    "event_name": "Siete Veces Adios en San Luis Potosi",
+    "subdomain": null,
+    "category_id": 2,
+    "category_name": "Teatro",
+    "date": 1789941600,
+    "venue_id": 662,
+    "venue_name": "Centro Cultural Universitario Bicentenario",
+    "city": "San Luis Potosí",
+    "state": "San Luis Potosí",
+    "poster": null
+   },
+   {
+    "event_id": 20367,
+    "event_name": "Finisimas Personas en San Luis Potosi",
+    "subdomain": null,
+    "category_id": 4,
+    "category_name": "Comediantes",
+    "date": 1790395200,
+    "venue_id": 434,
+    "venue_name": "La Casa de Oscar Burgos San Luis",
+    "city": "San Luis Potosí",
+    "state": "San Luis Potosí",
+    "poster": null
+   },
+   {
+    "event_id": 20182,
+    "event_name": "Alvaro Diaz en San Luis Potosi",
+    "subdomain": null,
+    "category_id": 1,
+    "category_name": "Concierto",
+    "date": 1790910000,
+    "venue_id": 238,
+    "venue_name": "Teatro de la Cd. Parque Tangamanga I",
+    "city": "San Luis Potosí",
+    "state": "San Luis Potosí",
+    "poster": null
+   },
+   {
+    "event_id": 20303,
+    "event_name": "FROZEN ON ICE / ESPECIAL KPOP (CUMBRES)",
+    "subdomain": null,
+    "category_id": 5,
+    "category_name": "Familiares",
+    "date": 1784078100,
+    "venue_id": 492,
+    "venue_name": "Circo Fantasy On Ice Cumbres",
+    "city": "Monterrey",
+    "state": "Nuevo León",
+    "poster": null
+   },
+   {
+    "event_id": 17743,
+    "event_name": "César Lozano \"Feliz Mente Imperfectos\" en Matamoros",
+    "subdomain": null,
+    "category_id": 7,
+    "category_name": "Conferencia",
+    "date": 1784080800,
+    "venue_id": 533,
+    "venue_name": "Teatro de la Reforma",
+    "city": "Heroica Matamoros",
+    "state": "Tamaulipas",
+    "poster": null
+   }
+  ]
+ }
+}

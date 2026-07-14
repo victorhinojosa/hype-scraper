@@ -147,11 +147,14 @@ def _to_scraped(rec: dict, *, with_address: bool) -> Optional[ScrapedEvent]:
     if not slug or not name:
         return None
 
-    # SLP sanity filter across region + venue + name.
-    region = _clean(rec.get("nombre_region")) or ""
     venue = _clean(rec.get("lugar"))
-    if not _SLP_RE.search(" ".join([region, venue or "", name])):
-        log.info("dropping non-SLP event: %s", slug)
+    # SLP filter: match on the CITY (nombre_communa), not the state, so towns
+    # elsewhere in SLP state are excluded. Fall back to venue+name if the API
+    # omits the commune (rare) so we don't silently drop a real city event.
+    commune = _clean(rec.get("nombre_communa")) or ""
+    haystack = commune if commune else " ".join([venue or "", name])
+    if not _SLP_RE.search(haystack):
+        log.info("dropping non-city-SLP event: %s (commune=%r)", slug, commune)
         return None
 
     date_start = _ymd(rec.get("fecha_inicio"))

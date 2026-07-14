@@ -10,7 +10,7 @@ the shared `event-covers` storage bucket). Runs on Render on a cron schedule.
 
 ## What it does, per run
 
-For each source (Passline today; Arema/Solcet stubbed):
+For each source (Passline, Arema, Solcet):
 
 1. **Scrape** the source's SLP listing and per-event structured data.
 2. **Dedup** against the `scraped_events` log — skip anything we've seen before,
@@ -59,6 +59,29 @@ venue or the admin supplies the address).
 > finding the JSON API made all of that unnecessary. If Passline ever locks the
 > API down, `curl_cffi` + the detail JSON-LD is the fallback, or a JS-rendering
 > proxy for discovery.
+
+## The other two sources
+
+**Arema** (`arema.mx`) — a React SPA with an open JSON API. One call,
+`POST https://t3lb.arema.mx/public/events/list`, returns every national event;
+we keep those whose `city` is San Luis Potosí (~18). Each record's `date` is a
+unix timestamp that includes the local show time. Flyer is at a predictable CDN
+path; ticket URL is `arema.mx/e/{id}`. No AI needed (price is left null).
+
+**Solcet** (`solcet.mx`) — an SLP-focused, server-rendered site. We parse the
+homepage cards (slug, name, `venue · city`, price) and keep the SLP-city ones,
+then read each event page's schema.org JSON-LD for the venue + flyer image. The
+date/time aren't in structured data (only on the flyer), so the **AI fallback**
+reads them off the flyer. Events whose flyer yields no date are logged but not
+inserted (no dateless drafts).
+
+**Geo scope:** all three filter on the **city** of San Luis Potosí, not the
+state — events in Xilitla/Matehuala/etc. are excluded.
+
+**AI usage:** the fallback only fires when an *essential* field (name, venue,
+date, time) is missing AND a flyer exists — so Passline/Arema rarely call it;
+Solcet calls it once per new event for the date/time. Missing price never
+triggers it (price is optional, admin adds on review).
 
 ## Setup
 
@@ -111,6 +134,7 @@ hype_scraper/
   ai_fallback.py            Anthropic fallback (ported flyer prompt)
   pipeline.py               dedup -> match -> image -> map -> insert -> log
   sources/
-    passline.py             source #1 (implemented)
-    arema.py, solcet.py     stubs
+    passline.py             source #1 — JSON API + detail JSON-LD
+    arema.py                source #2 — JSON API (t3lb)
+    solcet.py               source #3 — HTML cards + JSON-LD + AI date/time
 ```

@@ -41,7 +41,15 @@ class ScrapedEvent:
     raw_description: Optional[str] = None
 
     def missing_fields(self) -> list[str]:
-        """Fields the AI fallback may try to fill when a flyer image is available."""
+        """Essential fields whose absence justifies an AI flyer read.
+
+        Deliberately EXCLUDES price_label: price is optional (admin adds it on
+        review) and rarely legible on a flyer, so it's not worth a Haiku call.
+        Including it would make every Arema event (no price in its API) invoke
+        the AI for nothing. The AI may still *return* a price — see the pipeline,
+        which accepts it opportunistically when the fallback runs for other
+        reasons — but a missing price alone never triggers the fallback.
+        """
         out = []
         if not self.name:
             out.append("name")
@@ -51,6 +59,4 @@ class ScrapedEvent:
             out.append("date_start")
         if not self.time_start:
             out.append("time_start")
-        if not self.price_label:
-            out.append("price_label")
         return out
