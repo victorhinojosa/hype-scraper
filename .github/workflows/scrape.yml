@@ -1,0 +1,44 @@
+name: scrape
+
+# Runs the scraper on a schedule (twice daily) and lets you trigger it manually
+# from the Actions tab. Secrets come from the repo's Actions secrets, not code.
+on:
+  schedule:
+    # 09:00 and 21:00 America/Mexico_City (UTC-6) => 15:00 and 03:00 UTC.
+    # GitHub cron is UTC; timing can drift a few minutes under load.
+    - cron: "0 3,15 * * *"
+  workflow_dispatch:      # manual "Run workflow" button
+    inputs:
+      dry_run:
+        description: "Dry run (log only, no writes)"
+        type: boolean
+        default: false
+      sources:
+        description: "Comma-separated sources (blank = all)"
+        type: string
+        default: ""
+
+jobs:
+  scrape:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - run: pip install -r requirements.txt
+
+      - name: Run scraper
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          # For a manual dispatch these use the button inputs; for the scheduled
+          # run inputs are empty, so it's a real run of all sources.
+          DRY_RUN: ${{ github.event.inputs.dry_run == 'true' && '1' || '0' }}
+          SOURCES: ${{ github.event.inputs.sources }}
+        run: python run.py
