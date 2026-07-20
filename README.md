@@ -10,7 +10,7 @@ the shared `event-covers` storage bucket). Runs on Render on a cron schedule.
 
 ## What it does, per run
 
-For each source (Passline, Arema, Solcet):
+For each source (Passline, Arema, Solcet, BoletoHub, Superboletos):
 
 1. **Scrape** the source's SLP listing and per-event structured data.
 2. **Dedup** against the `scraped_events` log — skip anything we've seen before,
@@ -75,7 +75,29 @@ date/time aren't in structured data (only on the flyer), so the **AI fallback**
 reads them off the flyer. Events whose flyer yields no date are logged but not
 inserted (no dateless drafts).
 
-**Geo scope:** all three filter on the **city** of San Luis Potosí, not the
+**BoletoHub** (`boletohub.com`) — server-rendered, un-challenged. The explore
+page filtered by city lists the events (`/explorar?city=san+luis+potosí` — the
+**accented `í` is required**, without it the filter returns nothing); each
+`/evento/{code}` page carries a rich schema.org JSON-LD with venue, **full street
+address**, image, and an offers array we turn into a price range. Its `startDate`
+is a real **UTC** instant, so it's converted to America/Mexico_City (unlike
+Passline, whose offset is cosmetic).
+
+**Superboletos** (`superboletos.com`) — a statically-exported Next.js site whose
+data sits in a public CloudFront JSON cache (~1150 events, no auth). The CDN
+base/repo/version are read out of the site's `_app` chunk at runtime, so a cache
+version bump doesn't break us. Because the feed is a **full national archive**,
+it's filtered hard: SLP city, `NORMAL` status (drops CANCELADO), future dates
+only, and an allow-list of event types.
+
+> **Cinema exclusion:** Superboletos sells *movie tickets* (Cineteca Alameda,
+> Sala Lupe Vélez) categorised as "Familiares", alongside genuine events — so
+> category alone can't separate them. Those venues are excluded by name. Note
+> this is **Superboletos-only**: BoletoHub legitimately hosts live concerts at
+> the Cineteca, and those are kept. `Deportes` is excluded entirely (season-pass
+> listings that map poorly to single events).
+
+**Geo scope:** every source filters on the **city** of San Luis Potosí, not the
 state — events in Xilitla/Matehuala/etc. are excluded.
 
 **AI usage:** the fallback only fires when an *essential* field (name, venue,
@@ -137,4 +159,6 @@ hype_scraper/
     passline.py             source #1 — JSON API + detail JSON-LD
     arema.py                source #2 — JSON API (t3lb)
     solcet.py               source #3 — HTML cards + JSON-LD + AI date/time
+    boletohub.py            source #4 — explore listing + detail JSON-LD
+    superboletos.py         source #5 — CloudFront JSON cache + hard filters
 ```
