@@ -10,7 +10,8 @@ the shared `event-covers` storage bucket). Runs on Render on a cron schedule.
 
 ## What it does, per run
 
-For each source (Passline, Arema, Solcet, BoletoHub, Superboletos):
+For each source (Passline, Arema, Solcet, BoletoHub, Superboletos, Boletok,
+Ticketmania):
 
 1. **Scrape** the source's SLP listing and per-event structured data.
 2. **Dedup** against the `scraped_events` log — skip anything we've seen before,
@@ -93,17 +94,37 @@ only, and an allow-list of event types.
 > **Cinema exclusion:** Superboletos sells *movie tickets* (Cineteca Alameda,
 > Sala Lupe Vélez) categorised as "Familiares", alongside genuine events — so
 > category alone can't separate them. Those venues are excluded by name. Note
-> this is **Superboletos-only**: BoletoHub legitimately hosts live concerts at
-> the Cineteca, and those are kept. `Deportes` is excluded entirely (season-pass
-> listings that map poorly to single events).
+> this is **Superboletos-only**: BoletoHub, Boletok and Ticketmania legitimately
+> host live concerts at the Cineteca, and those are kept. `Deportes` is excluded
+> entirely (season-pass listings that map poorly to single events).
+
+**Boletok** (`boletok.com.mx`) — runs on the white-label **Palco4** platform. The
+public pages are a redirect shell whose event data is JS-hydrated, but Palco4
+publishes the whole catalog as a static JSON blob on CloudFront
+(`var EventosBuscador = [...]`, ~40 national events). Like Superboletos, the
+cache filename carries a version suffix, so we read the current URL out of the
+landing page (`/ventas/cms`) at runtime. Filtered to SLP by city, dropping the
+`Deportes` genre and past dates. `fechaDesde` is a local wall-clock string (no TZ
+conversion). Everything (name, venue, date/time, price, poster) is in the blob —
+no AI, no per-event fetch.
+
+**Ticketmania** (`ticketmania.mx`) — runs on the **Ticketplus** platform;
+server-rendered and un-challenged. The homepage lists national events as
+`/events/<slug>` cards; each event page carries a schema.org/Event JSON-LD with
+name, dates, venue, street address, image and price. No AI needed. **Geo
+exception:** its JSON-LD leaves `addressLocality` empty and only fills
+`addressRegion`, so — unlike every other source — Ticketmania is filtered on the
+**state** ("San Luis Potosí"), not the city. In practice its SLP events are all
+in the capital, so this doesn't leak outlying towns. JSON-LD titles carry HTML
+entities (`&quot;`), which are unescaped.
 
 **Geo scope:** every source filters on the **city** of San Luis Potosí, not the
 state — events in Xilitla/Matehuala/etc. are excluded.
 
 **AI usage:** the fallback only fires when an *essential* field (name, venue,
-date, time) is missing AND a flyer exists — so Passline/Arema rarely call it;
-Solcet calls it once per new event for the date/time. Missing price never
-triggers it (price is optional, admin adds on review).
+date, time) is missing AND a flyer exists — so Passline/Arema/BoletoHub/Boletok/
+Ticketmania rarely call it; Solcet calls it once per new event for the date/time.
+Missing price never triggers it (price is optional, admin adds on review).
 
 ## Setup
 
@@ -161,4 +182,6 @@ hype_scraper/
     solcet.py               source #3 — HTML cards + JSON-LD + AI date/time
     boletohub.py            source #4 — explore listing + detail JSON-LD
     superboletos.py         source #5 — CloudFront JSON cache + hard filters
+    boletok.py              source #6 — Palco4 CloudFront JSON catalog
+    ticketmania.py          source #7 — Ticketplus listing + detail JSON-LD
 ```

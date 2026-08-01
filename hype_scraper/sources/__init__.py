@@ -9,7 +9,7 @@ from __future__ import annotations
 from typing import Callable
 
 from ..models import ScrapedEvent
-from . import arema, boletohub, passline, solcet, superboletos
+from . import arema, boletohub, boletok, passline, solcet, superboletos, ticketmania
 
 # name -> scrape function
 REGISTRY: dict[str, Callable[[], list[ScrapedEvent]]] = {
@@ -18,4 +18,6 @@ REGISTRY: dict[str, Callable[[], list[ScrapedEvent]]] = {
     "solcet": solcet.scrape,
     "boletohub": boletohub.scrape,
     "superboletos": superboletos.scrape,
+    "boletok": boletok.scrape,
+    "ticketmania": ticketmania.scrape,
 }
